@@ -5,6 +5,11 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 export const supabase = createClient(url, anon)
 
+// Browser client for auth
+export function createSupabaseBrowserClient() {
+  return createClient(url, anon)
+}
+
 const Row = z.object({
   sku: z.string().min(1),
   name: z.string().min(1),

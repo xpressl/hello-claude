@@ -25,7 +25,7 @@ export default function UploadCsv() {
                 const rows = (res.data as any[]).map((r) => ({
                   sku: String(r.sku).trim(),
                   name: String(r.name).trim(),
-                  unit_type: String(r.unit_type).toUpperCase(),
+                  unit_type: String(r.unit_type).toUpperCase() as "EACH" | "LF" | "SF" | "BF" | "BOX" | "CASE",
                   unit_price: Number(r.unit_price),
                   aliases: r.aliases
                     ? String(r.aliases)
