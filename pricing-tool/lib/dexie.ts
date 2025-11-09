@@ -1,29 +1,21 @@
-import Dexie, { type EntityTable } from 'dexie'
+import Dexie, { Table } from "dexie"
 
-// Database schema interface
-export interface LocalProduct {
+export interface Product {
   id: string
   sku: string
   name: string
-  unit_type: 'EA' | 'LF' | 'SF' | 'BOX' | 'PKG' | 'SET'
+  unit_type: "EACH" | "LF" | "SF" | "BF" | "BOX" | "CASE"
   unit_price: number
   aliases: string[]
   updated_at: string
 }
 
-// Dexie database class
-export class PricingDatabase extends Dexie {
-  products!: EntityTable<LocalProduct, 'id'>
-
+class PricingDB extends Dexie {
+  products!: Table<Product, string>
   constructor() {
-    super('pricingDB')
-
-    // Define schema version 1
-    this.version(1).stores({
-      products: 'id, sku, name, *aliases, updated_at',
-    })
+    super("pricingDB")
+    this.version(1).stores({ products: "id, sku, name, unit_type, updated_at" })
   }
 }
 
-// Export singleton instance
-export const db = new PricingDatabase()
+export const db = new PricingDB()
