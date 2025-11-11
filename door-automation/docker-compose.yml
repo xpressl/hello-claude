@@ -1,0 +1,221 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: door-automation-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-door_automation}
+      POSTGRES_USER: ${POSTGRES_USER:-dooradmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doorpass123}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/shared/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dooradmin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Queue Management
+  redis:
+    image: redis:7-alpine
+    container_name: door-automation-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # MinIO for Object Storage (S3-compatible)
+  minio:
+    image: minio/minio:latest
+    container_name: door-automation-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Orchestrator API (Main API and Queue Manager)
+  orchestrator:
+    build:
+      context: ./backend/orchestrator
+      dockerfile: Dockerfile
+    container_name: door-automation-orchestrator
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${ORCHESTRATOR_PORT:-3000}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-door_automation}
+      POSTGRES_USER: ${POSTGRES_USER:-dooradmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doorpass123}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-door-automation}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    ports:
+      - "${ORCHESTRATOR_PORT:-3000}:3000"
+    volumes:
+      - ./backend/orchestrator/src:/app/src
+      - ./backend/shared:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # Ack Parser Worker Agent
+  ack-parser:
+    build:
+      context: ./backend/agents/ack-parser
+      dockerfile: Dockerfile
+    container_name: door-automation-ack-parser
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-door_automation}
+      POSTGRES_USER: ${POSTGRES_USER:-dooradmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doorpass123}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-door-automation}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      - ./backend/agents/ack-parser/src:/app/src
+      - ./backend/shared:/app/shared
+    depends_on:
+      - redis
+      - postgres
+      - minio
+
+  # Compare Worker Agent
+  compare:
+    build:
+      context: ./backend/agents/compare
+      dockerfile: Dockerfile
+    container_name: door-automation-compare
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-door_automation}
+      POSTGRES_USER: ${POSTGRES_USER:-dooradmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doorpass123}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-door-automation}
+    volumes:
+      - ./backend/agents/compare/src:/app/src
+      - ./backend/shared:/app/shared
+    depends_on:
+      - redis
+      - postgres
+      - minio
+
+  # PDF Generator Worker
+  pdf-generator:
+    build:
+      context: ./backend/agents/pdf-generator
+      dockerfile: Dockerfile
+    container_name: door-automation-pdf-generator
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-door-automation}
+    volumes:
+      - ./backend/agents/pdf-generator/src:/app/src
+      - ./backend/shared:/app/shared
+    depends_on:
+      - redis
+      - minio
+
+  # Email Worker Agent
+  email:
+    build:
+      context: ./backend/agents/email
+      dockerfile: Dockerfile
+    container_name: door-automation-email
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-door-automation}
+    volumes:
+      - ./backend/agents/email/src:/app/src
+      - ./backend/shared:/app/shared
+    depends_on:
+      - redis
+      - minio
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+
+networks:
+  default:
+    name: door-automation-network
