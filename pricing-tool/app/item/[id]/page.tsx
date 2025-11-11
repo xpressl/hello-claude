@@ -36,6 +36,10 @@ export default function ItemPage({ params }: { params: { id: string } }) {
       <Calculator
         unitPrice={Number(p.unit_price)}
         unitLabel={p.unit_type === "LF" ? "ft" : "qty"}
+        initialQty={qty}
+        initialMarkup={markup}
+        productName={p.name}
+        productSku={p.sku}
       />
     </main>
   )
