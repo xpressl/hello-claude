@@ -31,6 +31,7 @@ export default function OptionForm({
 
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [constraintsText, setConstraintsText] = useState(
     JSON.stringify(option?.constraints_json || {}, null, 2)
   )
@@ -84,6 +85,7 @@ export default function OptionForm({
 
     try {
       setSaving(true)
+      setSaveError(null)
 
       const body = {
         ...formData,
@@ -113,7 +115,7 @@ export default function OptionForm({
       onSaved()
     } catch (err: any) {
       console.error('Error saving option:', err)
-      alert('Failed to save option: ' + err.message)
+      setSaveError('Failed to save option: ' + err.message)
     } finally {
       setSaving(false)
     }
@@ -157,6 +159,42 @@ export default function OptionForm({
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="p-6 space-y-6">
+            {/* Save error message */}
+            {saveError && (
+              <div className="rounded-md bg-red-50 border border-red-200 p-3">
+                <div className="flex items-center">
+                  <svg
+                    className="h-5 w-5 text-red-400 mr-2"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <p className="text-sm text-red-800">{saveError}</p>
+                  <button
+                    type="button"
+                    onClick={() => setSaveError(null)}
+                    className="ml-auto text-red-400 hover:text-red-600"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Code and Label */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>

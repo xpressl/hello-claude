@@ -23,11 +23,13 @@ export default function OptionCard({
   const [expanded, setExpanded] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // Handle delete
   const handleDelete = async () => {
     try {
       setDeleting(true)
+      setError(null)
       const response = await fetch(
         `/api/catalog/${catalogItemId}/options/${option.id}`,
         {
@@ -45,7 +47,7 @@ export default function OptionCard({
       onDeleted()
     } catch (err: any) {
       console.error('Error deleting option:', err)
-      alert('Failed to delete option: ' + err.message)
+      setError('Failed to delete option: ' + err.message)
     } finally {
       setDeleting(false)
       setShowDeleteConfirm(false)
@@ -55,6 +57,7 @@ export default function OptionCard({
   // Toggle active status
   const handleToggleActive = async () => {
     try {
+      setError(null)
       const response = await fetch(
         `/api/catalog/${catalogItemId}/options/${option.id}`,
         {
@@ -76,13 +79,47 @@ export default function OptionCard({
       onDeleted() // Refresh the list
     } catch (err: any) {
       console.error('Error updating option:', err)
-      alert('Failed to update option: ' + err.message)
+      setError('Failed to update option: ' + err.message)
     }
   }
 
   return (
     <>
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        {/* Error message */}
+        {error && (
+          <div className="bg-red-50 border-b border-red-200 p-3">
+            <div className="flex items-center">
+              <svg
+                className="h-5 w-5 text-red-400 mr-2"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              <p className="text-sm text-red-800">{error}</p>
+              <button
+                onClick={() => setError(null)}
+                className="ml-auto text-red-400 hover:text-red-600"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
         {/* Option header */}
         <div className="p-4 sm:p-6">
           <div className="flex items-start justify-between">
@@ -282,17 +319,15 @@ export default function OptionCard({
       </div>
 
       {/* Delete confirmation dialog */}
-      {showDeleteConfirm && (
-        <ConfirmDialog
-          title="Delete Option"
-          message={`Are you sure you want to delete the "${option.label}" option? This will also delete all associated values. This action cannot be undone.`}
-          confirmLabel="Delete"
-          confirmVariant="danger"
-          onConfirm={handleDelete}
-          onCancel={() => setShowDeleteConfirm(false)}
-          loading={deleting}
-        />
-      )}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        title="Delete Option"
+        message={`Are you sure you want to delete the "${option.label}" option? This will also delete all associated values. This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </>
   )
 }

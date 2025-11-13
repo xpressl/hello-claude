@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { ItemOption } from "@/lib/types"
 import {
   calculateOptionsPriceImpact,
@@ -33,6 +33,12 @@ export default function OptionsPicker({
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+
+  // Use ref to avoid infinite loop from onOptionsChange changing
+  const onOptionsChangeRef = useRef(onOptionsChange)
+  useEffect(() => {
+    onOptionsChangeRef.current = onOptionsChange
+  }, [onOptionsChange])
 
   // Fetch options from API
   useEffect(() => {
@@ -85,9 +91,9 @@ export default function OptionsPicker({
       setErrors(validation.errors)
 
       // Notify parent component
-      onOptionsChange(selections, calculation.total_impact)
+      onOptionsChangeRef.current(selections, calculation.total_impact)
     }
-  }, [selections, options, basePrice, onOptionsChange])
+  }, [selections, options, basePrice])
 
   // Handle option value change
   const handleOptionChange = (code: string, value: any) => {
@@ -98,12 +104,37 @@ export default function OptionsPicker({
   }
 
   // Retry loading options
-  const retryLoad = () => {
+  const retryLoad = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
-    // Trigger re-fetch by updating a key or similar
-    window.location.reload()
-  }
+
+    try {
+      const response = await fetch(
+        `/api/catalog/${catalogItemId}/options/customer`
+      )
+
+      if (!response.ok) {
+        throw new Error('Failed to load options')
+      }
+
+      const data = await response.json()
+
+      if (data.options && Array.isArray(data.options)) {
+        setOptions(data.options)
+
+        // Reset to default selections
+        const defaults = getDefaultSelections(data.options)
+        setSelections(defaults)
+      } else {
+        setOptions([])
+      }
+    } catch (error) {
+      console.error('Error fetching options:', error)
+      setLoadError('Unable to load options. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [catalogItemId])
 
   // Loading state
   if (isLoading) {

@@ -13,6 +13,7 @@ export default function OptionValuesTable({ option, userRole }: OptionValuesTabl
   const [values, setValues] = useState<OptionValue[]>(option.values || [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
   const [editingValue, setEditingValue] = useState<OptionValue | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<OptionValue | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
@@ -79,6 +80,7 @@ export default function OptionValuesTable({ option, userRole }: OptionValuesTabl
     e.preventDefault()
 
     try {
+      setFormError(null)
       const url = editingValue
         ? `/api/options/values/${editingValue.id}`
         : `/api/options/${option.id}/values`
@@ -103,13 +105,14 @@ export default function OptionValuesTable({ option, userRole }: OptionValuesTabl
       fetchValues()
     } catch (err: any) {
       console.error('Error saving value:', err)
-      alert('Failed to save value: ' + err.message)
+      setFormError('Failed to save value: ' + err.message)
     }
   }
 
   // Handle delete
   const handleDelete = async (value: OptionValue) => {
     try {
+      setFormError(null)
       const response = await fetch(`/api/options/values/${value.id}`, {
         method: 'DELETE',
         headers: {
@@ -125,7 +128,8 @@ export default function OptionValuesTable({ option, userRole }: OptionValuesTabl
       fetchValues()
     } catch (err: any) {
       console.error('Error deleting value:', err)
-      alert('Failed to delete value: ' + err.message)
+      setFormError('Failed to delete value: ' + err.message)
+      setShowDeleteConfirm(null)
     }
   }
 
@@ -146,6 +150,7 @@ export default function OptionValuesTable({ option, userRole }: OptionValuesTabl
   // Toggle active
   const handleToggleActive = async (value: OptionValue) => {
     try {
+      setFormError(null)
       const response = await fetch(`/api/options/values/${value.id}`, {
         method: 'PATCH',
         headers: {
@@ -164,7 +169,7 @@ export default function OptionValuesTable({ option, userRole }: OptionValuesTabl
       fetchValues()
     } catch (err: any) {
       console.error('Error updating value:', err)
-      alert('Failed to update value: ' + err.message)
+      setFormError('Failed to update value: ' + err.message)
     }
   }
 
@@ -193,6 +198,40 @@ export default function OptionValuesTable({ option, userRole }: OptionValuesTabl
       {error && (
         <div className="rounded-md bg-red-50 p-3">
           <p className="text-sm text-red-800">{error}</p>
+        </div>
+      )}
+
+      {formError && (
+        <div className="rounded-md bg-red-50 border border-red-200 p-3">
+          <div className="flex items-center">
+            <svg
+              className="h-5 w-5 text-red-400 mr-2"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <p className="text-sm text-red-800">{formError}</p>
+            <button
+              onClick={() => setFormError(null)}
+              className="ml-auto text-red-400 hover:text-red-600"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
       )}
 
@@ -398,16 +437,15 @@ export default function OptionValuesTable({ option, userRole }: OptionValuesTabl
       )}
 
       {/* Delete confirmation */}
-      {showDeleteConfirm && (
-        <ConfirmDialog
-          title="Delete Value"
-          message={`Are you sure you want to delete "${showDeleteConfirm.label}"? This action cannot be undone.`}
-          confirmLabel="Delete"
-          confirmVariant="danger"
-          onConfirm={() => handleDelete(showDeleteConfirm)}
-          onCancel={() => setShowDeleteConfirm(null)}
-        />
-      )}
+      <ConfirmDialog
+        isOpen={!!showDeleteConfirm}
+        title="Delete Value"
+        message={`Are you sure you want to delete "${showDeleteConfirm?.label}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => handleDelete(showDeleteConfirm!)}
+        onCancel={() => setShowDeleteConfirm(null)}
+      />
     </div>
   )
 }

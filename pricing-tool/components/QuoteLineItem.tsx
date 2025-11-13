@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { QuoteLineDraft } from "@/lib/types"
 import { formatMoney } from "@/lib/pricing"
 import OptionsPicker from "./OptionsPicker"
@@ -26,6 +26,21 @@ export default function QuoteLineItem({
 }: QuoteLineItemProps) {
   const [showOptions, setShowOptions] = useState(false)
 
+  // Store the original base price to avoid double-counting options
+  // This should be the product's base price without any option adjustments
+  const basePriceRef = useRef<number>(line.unit_price)
+
+  // Update base price when catalog_item_id changes (new product selected)
+  // or when unit_price changes and there are no options selected
+  useEffect(() => {
+    if (line.catalog_item_id) {
+      // If no options are selected yet, the current unit_price is the base price
+      if (!line.options_json || Object.keys(line.options_json).length === 0) {
+        basePriceRef.current = line.unit_price
+      }
+    }
+  }, [line.catalog_item_id, line.unit_price, line.options_json])
+
   const handleRemoveClick = () => {
     if (confirm('Remove this line item?')) {
       onRemove(index)
@@ -37,10 +52,8 @@ export default function QuoteLineItem({
     onChange(index, 'options_json', options)
 
     // Update unit_price with base price + price impact
-    // Note: base price should come from the catalog item
-    // For now, we'll just add the impact to the current price
-    // In a real scenario, you'd fetch the base price from the catalog
-    const newPrice = line.unit_price + priceImpact
+    // Use the stored base price (not current unit_price) to avoid double-counting
+    const newPrice = basePriceRef.current + priceImpact
     onChange(index, 'unit_price', newPrice)
   }
 
@@ -248,7 +261,7 @@ export default function QuoteLineItem({
                 catalogItemId={line.catalog_item_id}
                 initialOptions={line.options_json || {}}
                 onOptionsChange={handleOptionsChange}
-                basePrice={line.unit_price}
+                basePrice={basePriceRef.current}
                 compact={true}
               />
             )}
