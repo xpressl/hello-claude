@@ -1,0 +1,163 @@
+import { NextRequest, NextResponse } from "next/server"
+import { createClient } from "@supabase/supabase-js"
+import { CreateLineSchema } from "@/lib/validations"
+import {
+  errorResponse,
+  successResponse,
+  requireRole,
+  parseJsonBody,
+  getNextLineNumber,
+  recalculateQuoteTotals,
+  createEvent,
+} from "@/lib/api-utils"
+import { isQuoteLocked } from "@/lib/validations"
+
+// Create Supabase client
+function getSupabaseClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  return createClient(url, anonKey)
+}
+
+// POST /api/quotes/[id]/lines - Add line to quote
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  // Require authentication with SALES or ADMIN role
+  const authResult = await requireRole(request, ["SALES", "ADMIN"])
+  if ("error" in authResult) {
+    return authResult.error
+  }
+
+  const supabase = getSupabaseClient()
+  const { id: quoteId } = await params
+
+  // Parse and validate request body
+  const bodyResult = await parseJsonBody(request, CreateLineSchema)
+  if ("error" in bodyResult) {
+    return bodyResult.error
+  }
+
+  const {
+    catalog_item_id,
+    description,
+    quantity,
+    unit,
+    options,
+    unit_price,
+    source,
+    confidence_score,
+    mapping_warnings,
+    notes,
+  } = bodyResult.data
+
+  try {
+    // Check if quote exists and is not locked
+    const { data: quote, error: quoteError } = await supabase
+      .from("quotes")
+      .select("id, status")
+      .eq("id", quoteId)
+      .single()
+
+    if (quoteError) {
+      if (quoteError.code === "PGRST116") {
+        return errorResponse("Quote not found", 404)
+      }
+      console.error("Database error:", quoteError)
+      return errorResponse("Failed to fetch quote", 500, {
+        message: quoteError.message,
+      })
+    }
+
+    if (isQuoteLocked(quote.status)) {
+      return errorResponse(
+        `Cannot add lines to quote with status '${quote.status}'`,
+        409
+      )
+    }
+
+    // Validate catalog_item_id if provided
+    if (catalog_item_id) {
+      const { data: product, error: productError } = await supabase
+        .from("products")
+        .select("id")
+        .eq("id", catalog_item_id)
+        .single()
+
+      if (productError || !product) {
+        return errorResponse(
+          `Product with id '${catalog_item_id}' not found`,
+          400
+        )
+      }
+    }
+
+    // Get next line number
+    const lineNumber = await getNextLineNumber(quoteId)
+
+    // Calculate extended price
+    const extendedPrice = quantity * unit_price
+
+    // Create line
+    const lineData: any = {
+      quote_id: quoteId,
+      line_number: lineNumber,
+      description,
+      quantity,
+      unit: unit || "EA",
+      unit_price,
+      extended_price: extendedPrice,
+      source: source || "manual",
+    }
+
+    if (catalog_item_id) lineData.catalog_item_id = catalog_item_id
+    if (options) lineData.options_json = options
+    if (confidence_score !== undefined)
+      lineData.confidence_score = confidence_score
+    if (mapping_warnings) lineData.mapping_warnings_json = mapping_warnings
+    if (notes) lineData.notes = notes
+
+    const { data: line, error: lineError } = await supabase
+      .from("quote_lines")
+      .insert(lineData)
+      .select()
+      .single()
+
+    if (lineError) {
+      console.error("Database error:", lineError)
+      return errorResponse("Failed to create line", 500, {
+        message: lineError.message,
+      })
+    }
+
+    // Recalculate quote totals
+    const totals = await recalculateQuoteTotals(quoteId)
+
+    // Create 'line_added' event
+    await createEvent(
+      quoteId,
+      "line_added",
+      { line },
+      authResult.auth.userId,
+      request
+    )
+
+    return successResponse(
+      {
+        line,
+        quote: {
+          id: quoteId,
+          subtotal: totals.subtotal,
+          total: totals.total,
+        },
+      },
+      201
+    )
+  } catch (error: any) {
+    console.error("Unexpected error:", error)
+    return errorResponse("Internal server error", 500, {
+      message: error.message,
+    })
+  }
+}

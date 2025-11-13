@@ -1,4 +1,5 @@
 import Dexie, { Table } from "dexie"
+import { QuoteDraft } from "./types"
 
 export interface Product {
   id: string
@@ -12,9 +13,15 @@ export interface Product {
 
 class PricingDB extends Dexie {
   products!: Table<Product, string>
+  quoteDrafts!: Table<QuoteDraft, string>
+
   constructor() {
     super("pricingDB")
     this.version(1).stores({ products: "id, sku, name, unit_type, updated_at" })
+    this.version(2).stores({
+      products: "id, sku, name, unit_type, updated_at",
+      quoteDrafts: "id, customer_email, updated_at"
+    })
   }
 }
 
