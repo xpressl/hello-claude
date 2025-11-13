@@ -27,7 +27,7 @@ const CreateOptionSchema = z.object({
   required: z.boolean().default(false),
   default_value: z.string().nullable().optional(),
   sort_order: z.number().int().default(0),
-  constraints_json: z.record(z.any()).nullable().optional(),
+  constraints_json: z.record(z.string(), z.any()).nullable().optional(),
   price_delta_type: z.enum(['flat', 'percent', 'none']).default('none'),
   price_delta_value: z.number().nullable().optional(),
   active: z.boolean().default(true),

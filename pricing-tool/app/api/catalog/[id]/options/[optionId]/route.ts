@@ -28,7 +28,7 @@ const UpdateOptionSchema = z.object({
   required: z.boolean().optional(),
   default_value: z.string().nullable().optional(),
   sort_order: z.number().int().optional(),
-  constraints_json: z.record(z.any()).nullable().optional(),
+  constraints_json: z.record(z.string(), z.any()).nullable().optional(),
   price_delta_type: z.enum(['flat', 'percent', 'none']).optional(),
   price_delta_value: z.number().nullable().optional(),
   active: z.boolean().optional(),

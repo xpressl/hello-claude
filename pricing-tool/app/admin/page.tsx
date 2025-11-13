@@ -1,5 +1,8 @@
 "use client"
 
+// Force dynamic rendering - this page uses Supabase
+export const dynamic = 'force-dynamic'
+
 import UploadCsv from "@/components/UploadCsv"
 
 export default function AdminPage() {

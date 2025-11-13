@@ -115,11 +115,181 @@ ORDER BY role;
 
 ## RLS Permissions Summary
 
+### Phase 1: Core Tables
+
 | Role    | Products SELECT | Products INSERT | Products UPDATE | Products DELETE |
 |---------|-----------------|-----------------|-----------------|-----------------|
 | ADMIN   | ✅              | ✅              | ✅              | ✅              |
 | SALES   | ✅              | ❌              | ❌              | ❌              |
 | Anonymous | ❌            | ❌              | ❌              | ❌              |
+
+| Role    | Quotes SELECT | Quotes INSERT | Quotes UPDATE | Quotes DELETE |
+|---------|---------------|---------------|---------------|---------------|
+| ADMIN   | ✅ (all)      | ✅            | ✅            | ✅            |
+| SALES   | ✅ (all)      | ✅            | ❌            | ❌            |
+| Users   | ✅ (own)      | ✅            | ❌            | ❌            |
+| Anonymous | ❌          | ✅            | ❌            | ❌            |
+
+### Phase 2: Item Options Tables
+
+| Role    | Item Options SELECT | Item Options INSERT | Item Options UPDATE | Item Options DELETE |
+|---------|---------------------|---------------------|---------------------|---------------------|
+| ADMIN   | ✅                  | ✅                  | ✅                  | ✅                  |
+| SALES   | ✅                  | ❌                  | ❌                  | ❌                  |
+| Anonymous | ❌                | ❌                  | ❌                  | ❌                  |
+
+| Role    | Option Values SELECT | Option Values INSERT | Option Values UPDATE | Option Values DELETE |
+|---------|----------------------|----------------------|----------------------|----------------------|
+| ADMIN   | ✅                   | ✅                   | ✅                   | ✅                   |
+| SALES   | ✅                   | ❌                   | ❌                   | ❌                   |
+| Anonymous | ❌                 | ❌                   | ❌                   | ❌                   |
+
+## Phase 2: Item Options System
+
+Phase 2 introduces configurable product options with dynamic pricing.
+
+### Tables Created
+
+1. **item_options** - Defines available options for products (e.g., SIZE, COLOR, FINISH)
+2. **option_values** - Predefined values for select-type options with price deltas
+
+### Verify Phase 2 Tables
+
+Run these queries after executing the full schema:
+
+#### Check Phase 2 Tables Exist
+
+```sql
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+  AND table_name IN ('item_options', 'option_values')
+ORDER BY table_name;
+```
+
+Expected result: 2 tables
+
+#### Check RLS is Enabled on Phase 2 Tables
+
+```sql
+SELECT tablename, rowsecurity
+FROM pg_tables
+WHERE schemaname = 'public'
+  AND tablename IN ('item_options', 'option_values');
+```
+
+Expected: Both tables show `rowsecurity = true`
+
+#### Check Phase 2 Policies
+
+```sql
+SELECT tablename, policyname
+FROM pg_policies
+WHERE schemaname = 'public'
+  AND tablename IN ('item_options', 'option_values')
+ORDER BY tablename, policyname;
+```
+
+Expected: 5 policies per table (10 total)
+
+#### View Sample Door Product with Options
+
+```sql
+SELECT
+  p.sku,
+  p.name,
+  p.unit_price as base_price,
+  io.code as option_code,
+  io.label as option_label,
+  io.type,
+  io.required,
+  ov.value,
+  ov.label as value_label,
+  ov.price_delta
+FROM products p
+JOIN item_options io ON io.catalog_item_id = p.id
+LEFT JOIN option_values ov ON ov.item_option_id = io.id
+WHERE p.sku = 'DR-3080-20G'
+ORDER BY io.sort_order, ov.sort_order;
+```
+
+Expected: 4 options (SIZE, COLOR, FINISH, HARDWARE) with multiple values each
+
+#### Test Option Validation Function
+
+```sql
+-- Test valid options (should return is_valid = true)
+SELECT * FROM validate_product_options(
+  (SELECT id FROM products WHERE sku = 'DR-3080-20G'),
+  '{"SIZE": "36x80", "COLOR": "white", "HARDWARE": "lever_satin"}'::jsonb
+);
+```
+
+Expected result:
+```
+is_valid | errors
+---------|--------
+true     | {}
+```
+
+```sql
+-- Test invalid options (missing required field)
+SELECT * FROM validate_product_options(
+  (SELECT id FROM products WHERE sku = 'DR-3080-20G'),
+  '{"SIZE": "36x80", "COLOR": "white"}'::jsonb
+);
+```
+
+Expected result:
+```
+is_valid | errors
+---------|--------
+false    | {"Required option \"Hardware Package\" is missing"}
+```
+
+### Options Pricing Structure
+
+The schema supports two pricing models:
+
+1. **Value-level pricing**: Each option value has its own `price_delta`
+   - Example: COLOR → "White" (+$0), "Black" (+$15), "Custom" (+$75)
+
+2. **Option-level pricing**: The option itself has a `price_delta_type` and `price_delta_value`
+   - `flat`: Add/subtract fixed amount
+   - `percent`: Add/subtract percentage
+   - `none`: No option-level delta (use value-level only)
+
+### Sample Pricing Calculation
+
+For a Commercial Steel Door with:
+- Base price: **$425.00**
+- SIZE: 36x80 (+**$25.00**)
+- COLOR: black (+**$15.00**)
+- FINISH: powder_coat (+**$45.00**)
+- HARDWARE: lever_satin (+**$45.00**)
+
+**Total unit price: $555.00**
+
+This calculation should be performed in your application when creating quote line items.
+
+### options_json Format in Quote Lines
+
+When adding a product with options to a quote, store selections in `quote_lines.options_json`:
+
+```json
+{
+  "SIZE": "36x80",
+  "COLOR": "black",
+  "FINISH": "powder_coat",
+  "HARDWARE": "lever_satin"
+}
+```
+
+The application should:
+1. Validate options using `validate_product_options()` function
+2. Calculate unit_price by summing base price + all price deltas
+3. Store selected options in `options_json` column
+4. Store calculated `unit_price` in `quote_lines.unit_price`
 
 ## Troubleshooting
 

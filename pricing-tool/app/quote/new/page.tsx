@@ -136,7 +136,7 @@ export default function NewQuotePage() {
   }
 
   // Handle line change
-  const handleLineChange = (index: number, field: keyof QuoteLineDraft, value: string | number) => {
+  const handleLineChange = (index: number, field: keyof QuoteLineDraft, value: string | number | Record<string, any>) => {
     setQuote(prev => {
       const newLines = [...prev.lines]
       const line = { ...newLines[index] }
