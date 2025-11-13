@@ -42,7 +42,7 @@ export function parseVoiceQuery(t: string) {
     .replace(/markup\s*\d+(\.\d+)?/, "")
     .replace(/\b(\d+(\.\d+)?\s*(ft|foot|feet|pcs|pieces))\b/, "")
     .trim()
-  let unit: "LF" | "EACH" = "EACH"
+  let unit: "LF" | "EA" = "EA"
   if (/\b(ft|foot|feet)\b/.test(s)) unit = "LF"
   return { qty, markupPct, search, unit }
 }

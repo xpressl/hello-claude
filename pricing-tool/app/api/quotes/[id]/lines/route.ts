@@ -4,7 +4,7 @@ import { CreateLineSchema } from "@/lib/validations"
 import {
   errorResponse,
   successResponse,
-  requireRole,
+  optionalAuth,
   parseJsonBody,
   getNextLineNumber,
   recalculateQuoteTotals,
@@ -24,11 +24,10 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Require authentication with SALES or ADMIN role
-  const authResult = await requireRole(request, ["SALES", "ADMIN"])
-  if ("error" in authResult) {
-    return authResult.error
-  }
+  // Optional authentication - allows anonymous users
+  const authResult = await optionalAuth(request)
+  const userRole = authResult?.role || null
+  const userId = authResult?.userId || null
 
   const supabase = getSupabaseClient()
   const { id: quoteId } = await params
@@ -56,7 +55,7 @@ export async function POST(
     // Check if quote exists and is not locked
     const { data: quote, error: quoteError } = await supabase
       .from("quotes")
-      .select("id, status")
+      .select("id, status, created_by")
       .eq("id", quoteId)
       .single()
 
@@ -68,6 +67,14 @@ export async function POST(
       return errorResponse("Failed to fetch quote", 500, {
         message: quoteError.message,
       })
+    }
+
+    // Check permissions: SALES/ADMIN can access any quote, others can only access their own
+    const isSalesOrAdmin = userRole && ["SALES", "ADMIN"].includes(userRole)
+    const isQuoteOwner = quote.created_by === null || quote.created_by === userId
+
+    if (!isSalesOrAdmin && !isQuoteOwner) {
+      return errorResponse("Forbidden", 403)
     }
 
     if (isQuoteLocked(quote.status)) {
@@ -139,7 +146,7 @@ export async function POST(
       quoteId,
       "line_added",
       { line },
-      authResult.auth.userId,
+      userId || undefined,
       request
     )
 

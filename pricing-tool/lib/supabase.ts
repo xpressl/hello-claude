@@ -13,7 +13,7 @@ export function createSupabaseBrowserClient() {
 const Row = z.object({
   sku: z.string().min(1),
   name: z.string().min(1),
-  unit_type: z.enum(["EACH", "LF", "SF", "BF", "BOX", "CASE"]),
+  unit_type: z.enum(["EA", "LF", "SF", "BF", "BOX", "CASE"]),
   unit_price: z.number().nonnegative(),
   aliases: z.array(z.string()).optional().default([]),
 })

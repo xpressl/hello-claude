@@ -45,6 +45,10 @@ export default function QuotesTable({
   const [limit, setLimit] = useState(20)
   const [offset, setOffset] = useState(0)
 
+  // Sorting
+  const [sortColumn, setSortColumn] = useState<string>('created_at')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
+
   // Delete confirmation
   const [deleteQuoteId, setDeleteQuoteId] = useState<string | null>(null)
 
@@ -62,7 +66,13 @@ export default function QuotesTable({
 
   // Fetch quotes from API
   const fetchQuotes = useCallback(
-    async (newFilters = filters, newOffset = offset, newLimit = limit) => {
+    async (
+      newFilters = filters,
+      newOffset = offset,
+      newLimit = limit,
+      newSortColumn = sortColumn,
+      newSortDirection = sortDirection
+    ) => {
       setIsLoading(true)
       setError(null)
 
@@ -82,6 +92,8 @@ export default function QuotesTable({
         }
         params.set('limit', String(newLimit))
         params.set('offset', String(newOffset))
+        params.set('sort', newSortColumn)
+        params.set('order', newSortDirection)
 
         const response = await fetch(`/api/quotes?${params.toString()}`)
 
@@ -95,13 +107,12 @@ export default function QuotesTable({
         setOffset(newOffset)
         setLimit(newLimit)
       } catch (err) {
-        console.error('Error fetching quotes:', err)
         setError(err instanceof Error ? err.message : 'Failed to fetch quotes')
       } finally {
         setIsLoading(false)
       }
     },
-    [filters, offset, limit]
+    [filters, offset, limit, sortColumn, sortDirection]
   )
 
   // Handle filter changes
@@ -124,14 +135,53 @@ export default function QuotesTable({
       if (newFilters.to) {
         params.set('to', newFilters.to)
       }
+      params.set('sort', sortColumn)
+      params.set('order', sortDirection)
 
       const query = params.toString()
       router.push(`/admin/quotes${query ? `?${query}` : ''}`, { scroll: false })
 
       // Fetch with new filters
-      fetchQuotes(newFilters, 0, limit)
+      fetchQuotes(newFilters, 0, limit, sortColumn, sortDirection)
     },
-    [router, limit, fetchQuotes]
+    [router, limit, fetchQuotes, sortColumn, sortDirection]
+  )
+
+  // Handle sort changes
+  const handleSort = useCallback(
+    (column: string) => {
+      let newDirection: 'asc' | 'desc' = 'desc'
+      if (sortColumn === column) {
+        newDirection = sortDirection === 'asc' ? 'desc' : 'asc'
+      }
+
+      setSortColumn(column)
+      setSortDirection(newDirection)
+
+      // Update URL
+      const params = new URLSearchParams()
+      if (filters.status && filters.status !== 'all') {
+        params.set('status', filters.status)
+      }
+      if (filters.search) {
+        params.set('search', filters.search)
+      }
+      if (filters.from) {
+        params.set('from', filters.from)
+      }
+      if (filters.to) {
+        params.set('to', filters.to)
+      }
+      params.set('sort', column)
+      params.set('order', newDirection)
+
+      const query = params.toString()
+      router.push(`/admin/quotes${query ? `?${query}` : ''}`, { scroll: false })
+
+      // Fetch with new sort
+      fetchQuotes(filters, offset, limit, column, newDirection)
+    },
+    [sortColumn, sortDirection, filters, offset, limit, router, fetchQuotes]
   )
 
   // Handle sync
@@ -164,8 +214,7 @@ export default function QuotesTable({
       setTotal((prev) => prev - 1)
       setDeleteQuoteId(null)
     } catch (err) {
-      console.error('Error deleting quote:', err)
-      alert('Failed to delete quote. Please try again.')
+      setError(err instanceof Error ? err.message : 'Failed to delete quote. Please try again.')
     }
   }, [deleteQuoteId])
 
@@ -178,14 +227,31 @@ export default function QuotesTable({
   const handlePageChange = (newPage: number) => {
     const newOffset = (newPage - 1) * limit
     setOffset(newOffset)
-    fetchQuotes(filters, newOffset, limit)
+    fetchQuotes(filters, newOffset, limit, sortColumn, sortDirection)
   }
 
   const handleLimitChange = (newLimit: number) => {
     setLimit(newLimit)
     setOffset(0)
-    fetchQuotes(filters, 0, newLimit)
+    fetchQuotes(filters, 0, newLimit, sortColumn, sortDirection)
   }
+
+  // Render sortable column header
+  const SortableHeader = ({ column, label }: { column: string; label: string }) => (
+    <th
+      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+      onClick={() => handleSort(column)}
+    >
+      <div className="flex items-center gap-1">
+        {label}
+        {sortColumn === column && (
+          <span className="text-blue-600">
+            {sortDirection === 'asc' ? '▲' : '▼'}
+          </span>
+        )}
+      </div>
+    </th>
+  )
 
   return (
     <div className="space-y-4">
@@ -263,24 +329,14 @@ export default function QuotesTable({
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Quote ID
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Customer
-                </th>
+                <SortableHeader column="id" label="Quote ID" />
+                <SortableHeader column="customer_name" label="Customer" />
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Lines
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Total
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Created
-                </th>
+                <SortableHeader column="total" label="Total" />
+                <SortableHeader column="status" label="Status" />
+                <SortableHeader column="created_at" label="Created" />
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
                 </th>
@@ -344,7 +400,7 @@ export default function QuotesTable({
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                        0
+                        {quote.line_count || 0}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">

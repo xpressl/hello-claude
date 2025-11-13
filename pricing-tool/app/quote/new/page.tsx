@@ -250,7 +250,6 @@ export default function NewQuotePage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            line_number: i + 1,
             catalog_item_id: line.catalog_item_id || null,
             description: line.description,
             quantity: line.quantity,

@@ -96,22 +96,27 @@ export async function GET(request: NextRequest) {
       search: searchParams.get("search") || undefined,
       limit: searchParams.get("limit") || undefined,
       offset: searchParams.get("offset") || undefined,
+      sort: searchParams.get("sort") || "created_at",
+      order: searchParams.get("order") || "desc",
     }
 
     const validationResult = ListQuotesQuerySchema.safeParse(queryParams)
     if (!validationResult.success) {
       return errorResponse("Invalid query parameters", 400, {
-        validation_errors: validationResult.error.errors,
+        validation_errors: validationResult.error.issues || [],
       })
     }
 
-    const { status, search, limit, offset } = validationResult.data
+    const { status, search, limit, offset, sort, order } = validationResult.data
 
-    // Build query
+    // Build query with line count
     let query = supabase
       .from("quotes")
-      .select("*", { count: "exact" })
-      .order("created_at", { ascending: false })
+      .select(`
+        *,
+        line_count:quote_lines(count)
+      `, { count: "exact" })
+      .order(sort || "created_at", { ascending: order === "asc" })
 
     // Apply filters
     if (status) {

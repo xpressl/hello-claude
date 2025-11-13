@@ -31,7 +31,7 @@ export function exportQuotesToCSV(quotes: Quote[]): void {
       quote.customer_name || '--',
       quote.customer_email || '--',
       quote.customer_phone || '--',
-      '0', // Line count placeholder - would need to be passed or fetched
+      String(quote.line_count || 0),
       formatCurrency(quote.subtotal, quote.currency),
       formatCurrency(quote.tax, quote.currency),
       formatCurrency(quote.total, quote.currency),

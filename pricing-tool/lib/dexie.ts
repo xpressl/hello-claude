@@ -5,7 +5,7 @@ export interface Product {
   id: string
   sku: string
   name: string
-  unit_type: "EACH" | "LF" | "SF" | "BF" | "BOX" | "CASE"
+  unit_type: "EA" | "LF" | "SF" | "BF" | "BOX" | "CASE"
   unit_price: number
   aliases: string[]
   updated_at: string

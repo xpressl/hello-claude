@@ -48,6 +48,43 @@ function getAuthToken(request: Request): string | null {
   return authHeader
 }
 
+// Optional authentication - returns null if no valid auth token
+export async function optionalAuth(
+  request: Request
+): Promise<AuthResult | null> {
+  try {
+    const token = getAuthToken(request)
+    if (!token) return null
+
+    const supabase = getSupabaseClient()
+
+    // Verify the token and get user
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token)
+
+    if (authError || !user) return null
+
+    // Get user's role from the users table
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("role, email")
+      .eq("id", user.id)
+      .single()
+
+    if (userError || !userData) return null
+
+    return {
+      userId: user.id,
+      email: userData.email,
+      role: userData.role as "ADMIN" | "SALES",
+    }
+  } catch {
+    return null
+  }
+}
+
 // Require authentication
 export async function requireAuth(
   request: Request

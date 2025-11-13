@@ -378,17 +378,25 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to set expires_at when quote is sent
--- Sets expires_at to NOW() + 14 days when status changes to 'sent'
-CREATE OR REPLACE FUNCTION public.set_quote_expiration()
+-- Function to set timestamps when quote status changes
+-- Sets submitted_at when status changes to 'submitted'
+-- Sets sent_at and expires_at when status changes to 'sent'
+CREATE OR REPLACE FUNCTION public.set_quote_timestamps()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.status = 'sent' AND OLD.status != 'sent' THEN
+  -- Set submitted_at when status changes to 'submitted'
+  IF NEW.status = 'submitted' AND (OLD.status IS NULL OR OLD.status != 'submitted') THEN
+    NEW.submitted_at = NOW();
+  END IF;
+
+  -- Set sent_at and expires_at when status changes to 'sent'
+  IF NEW.status = 'sent' AND (OLD.status IS NULL OR OLD.status != 'sent') THEN
     NEW.sent_at = NOW();
     IF NEW.expires_at IS NULL THEN
       NEW.expires_at = NOW() + INTERVAL '14 days';
     END IF;
   END IF;
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -430,12 +438,12 @@ CREATE TRIGGER update_quote_totals_on_line_delete
   FOR EACH ROW
   EXECUTE FUNCTION public.update_quote_totals();
 
--- Trigger: Set expiration date when quote is sent
+-- Trigger: Set timestamps when quote status changes
 DROP TRIGGER IF EXISTS set_expiration_on_send ON public.quotes;
-CREATE TRIGGER set_expiration_on_send
+CREATE TRIGGER set_quote_status_timestamps
   BEFORE UPDATE ON public.quotes
   FOR EACH ROW
-  EXECUTE FUNCTION public.set_quote_expiration();
+  EXECUTE FUNCTION public.set_quote_timestamps();
 
 -- ============================================================================
 -- ROW LEVEL SECURITY (RLS) - QUOTES
@@ -575,9 +583,9 @@ CREATE POLICY "Users can insert quote lines"
     )
   );
 
--- Policy: Only ADMIN can UPDATE quote lines
+-- Policy: SALES and ADMIN can UPDATE quote lines
 DROP POLICY IF EXISTS "ADMIN can update quote lines" ON public.quote_lines;
-CREATE POLICY "ADMIN can update quote lines"
+CREATE POLICY "SALES and ADMIN can update quote lines"
   ON public.quote_lines
   FOR UPDATE
   TO authenticated
@@ -585,20 +593,20 @@ CREATE POLICY "ADMIN can update quote lines"
     EXISTS (
       SELECT 1 FROM public.users
       WHERE users.id = auth.uid()
-      AND users.role = 'ADMIN'
+      AND users.role IN ('SALES', 'ADMIN')
     )
   )
   WITH CHECK (
     EXISTS (
       SELECT 1 FROM public.users
       WHERE users.id = auth.uid()
-      AND users.role = 'ADMIN'
+      AND users.role IN ('SALES', 'ADMIN')
     )
   );
 
--- Policy: Only ADMIN can DELETE quote lines
+-- Policy: SALES and ADMIN can DELETE quote lines
 DROP POLICY IF EXISTS "ADMIN can delete quote lines" ON public.quote_lines;
-CREATE POLICY "ADMIN can delete quote lines"
+CREATE POLICY "SALES and ADMIN can delete quote lines"
   ON public.quote_lines
   FOR DELETE
   TO authenticated
@@ -606,7 +614,7 @@ CREATE POLICY "ADMIN can delete quote lines"
     EXISTS (
       SELECT 1 FROM public.users
       WHERE users.id = auth.uid()
-      AND users.role = 'ADMIN'
+      AND users.role IN ('SALES', 'ADMIN')
     )
   );
 

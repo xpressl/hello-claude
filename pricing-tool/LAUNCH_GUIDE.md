@@ -244,10 +244,10 @@ Use the admin panel to import your products:
 ```csv
 sku,name,unit_type,unit_price,aliases
 STUD-20GA-1.5,Stud 1-1/2" 20ga,LF,0.30,20ga stud|1.5 inch stud|metal stud
-DRY-SHEET-4X8,Drywall 4x8 1/2",EACH,12.00,sheetrock|drywall
+DRY-SHEET-4X8,Drywall 4x8 1/2",EA,12.00,sheetrock|drywall
 ```
 
-**Unit Types:** `EACH`, `LF`, `SF`, `BF`, `BOX`, `CASE`
+**Unit Types:** `EA`, `LF`, `SF`, `BF`, `BOX`, `CASE`
 **Aliases:** Pipe-separated (`|`) for better search
 
 **Steps:**

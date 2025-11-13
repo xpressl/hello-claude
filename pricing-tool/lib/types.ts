@@ -80,6 +80,7 @@ export interface Quote {
   sent_at: string | null
   expires_at: string | null
   version: number
+  line_count?: number
 }
 
 export interface QuoteLine {

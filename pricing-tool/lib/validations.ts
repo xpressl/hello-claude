@@ -58,11 +58,11 @@ export const CreateLineSchema = z.object({
   description: z.string().min(1).max(500),
   quantity: z.number().positive(),
   unit: z.string().max(20).optional().default("EA"),
-  options: z.record(z.any()).optional(),
+  options: z.record(z.string(), z.any()).optional(),
   unit_price: z.number().nonnegative(),
   source: LineSource.optional().default("manual"),
   confidence_score: z.number().min(0).max(1).optional(),
-  mapping_warnings: z.record(z.any()).optional(),
+  mapping_warnings: z.record(z.string(), z.any()).optional(),
   notes: z.string().max(1000).optional(),
 })
 export type CreateLineInput = z.infer<typeof CreateLineSchema>
@@ -71,7 +71,7 @@ export type CreateLineInput = z.infer<typeof CreateLineSchema>
 export const UpdateLineSchema = z.object({
   quantity: z.number().positive().optional(),
   unit_price: z.number().nonnegative().optional(),
-  options: z.record(z.any()).optional(),
+  options: z.record(z.string(), z.any()).optional(),
   description: z.string().min(1).max(500).optional(),
   notes: z.string().max(1000).optional(),
 })
@@ -83,6 +83,8 @@ export const ListQuotesQuerySchema = z.object({
   search: z.string().max(255).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
+  sort: z.enum(["id", "customer_name", "customer_email", "total", "status", "created_at", "submitted_at"]).optional().default("created_at"),
+  order: z.enum(["asc", "desc"]).optional().default("desc"),
 })
 export type ListQuotesQuery = z.infer<typeof ListQuotesQuerySchema>
 

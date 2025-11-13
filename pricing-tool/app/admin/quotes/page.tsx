@@ -3,19 +3,45 @@
  * Server Component for initial load and authentication
  */
 
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import QuotesTable from '@/components/QuotesTable'
 import type { Quote } from '@/lib/types'
 
-// Mock function to get current user role
-// TODO: Replace with actual server-side auth when implemented
+// Get current user role with proper authentication
 async function getCurrentUserRole(): Promise<'ADMIN' | 'SALES' | null> {
-  // For now, return ADMIN to allow development
-  // In production, this should:
-  // 1. Get session from cookies using createServerClient
-  // 2. Query users table for role
-  // 3. Return role or null if not authenticated
-  return 'ADMIN'
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value
+        },
+      },
+    }
+  )
+
+  // Check authentication
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return null
+  }
+
+  // Get user role from database
+  const { data: userRecord, error } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', user.id)
+    .single()
+
+  if (error || !userRecord) {
+    return null
+  }
+
+  return userRecord.role as 'ADMIN' | 'SALES' | null
 }
 
 // Fetch initial quotes
@@ -24,8 +50,8 @@ async function fetchInitialQuotes(): Promise<{
   total: number
 }> {
   try {
-    // In a real implementation, this would use server-side Supabase client
-    // For now, we'll return empty array and let the client component fetch
+    // Let the client component fetch data
+    // This ensures we don't duplicate authentication logic
     return {
       quotes: [],
       total: 0,
@@ -44,13 +70,12 @@ export default async function AdminQuotesPage() {
   const role = await getCurrentUserRole()
 
   // Redirect if not authenticated
-  // TODO: Uncomment when auth is fully implemented
-  // if (!role) {
-  //   redirect('/login')
-  // }
+  if (!role) {
+    redirect('/login')
+  }
 
   // Check role authorization
-  if (role && !['ADMIN', 'SALES'].includes(role)) {
+  if (!['ADMIN', 'SALES'].includes(role)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg shadow-md p-8 max-w-md w-full">
