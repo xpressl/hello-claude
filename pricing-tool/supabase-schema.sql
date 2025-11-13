@@ -1209,3 +1209,646 @@ END $$;
 --   (SELECT id FROM products WHERE sku = 'DR-3080-20G'),
 --   '{"SIZE": "36x80", "COLOR": "white", "HARDWARE": "lever_satin"}'::jsonb
 -- );
+
+-- ============================================================================
+-- SUPABASE STORAGE: quote-uploads BUCKET
+-- ============================================================================
+-- This bucket must be created in Supabase Dashboard: Storage > Create Bucket
+-- Configuration:
+--   - Name: quote-uploads
+--   - Public: false (private bucket, requires authentication)
+--   - File size limit: 104857600 (100MB)
+--   - Allowed MIME types: See list below
+--
+-- Allowed MIME types:
+--   - application/pdf
+--   - image/jpeg, image/png, image/webp
+--   - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet (XLSX)
+--   - application/vnd.ms-excel (XLS)
+--   - text/csv, text/plain
+--   - audio/mpeg (MP3), audio/mp4 (M4A), audio/wav
+
+-- ============================================================================
+-- STORAGE RLS POLICIES: quote-uploads bucket
+-- ============================================================================
+
+-- Policy: Users can upload to their own quotes
+-- Allows authenticated users to upload files to quotes they own or have access to
+DROP POLICY IF EXISTS "Users can upload to their quotes" ON storage.objects;
+CREATE POLICY "Users can upload to their quotes"
+ON storage.objects FOR INSERT
+TO authenticated
+WITH CHECK (
+  bucket_id = 'quote-uploads' AND
+  (storage.foldername(name))[1] = 'quotes' AND
+  EXISTS (
+    SELECT 1 FROM quotes
+    WHERE id::text = (storage.foldername(name))[2]
+    AND (created_by = auth.uid() OR EXISTS (
+      SELECT 1 FROM public.users
+      WHERE users.id = auth.uid()
+      AND users.role IN ('ADMIN', 'SALES')
+    ))
+  )
+);
+
+-- Policy: Users can read their uploaded files
+-- Allows users to download files from quotes they have access to
+DROP POLICY IF EXISTS "Users can read their uploads" ON storage.objects;
+CREATE POLICY "Users can read their uploads"
+ON storage.objects FOR SELECT
+TO authenticated
+USING (
+  bucket_id = 'quote-uploads' AND
+  EXISTS (
+    SELECT 1 FROM uploads
+    WHERE storage_path = name
+    AND quote_id IN (
+      SELECT id FROM quotes
+      WHERE created_by = auth.uid() OR EXISTS (
+        SELECT 1 FROM public.users
+        WHERE users.id = auth.uid()
+        AND users.role IN ('ADMIN', 'SALES')
+      )
+    )
+  )
+);
+
+-- Policy: ADMIN can delete files
+-- Only administrators can delete uploaded files
+DROP POLICY IF EXISTS "Admins can delete uploads" ON storage.objects;
+CREATE POLICY "Admins can delete uploads"
+ON storage.objects FOR DELETE
+TO authenticated
+USING (
+  bucket_id = 'quote-uploads' AND
+  EXISTS (
+    SELECT 1 FROM public.users
+    WHERE users.id = auth.uid()
+    AND users.role = 'ADMIN'
+  )
+);
+
+-- Policy: Service role has full access to storage
+DROP POLICY IF EXISTS "Service role full access to storage" ON storage.objects;
+CREATE POLICY "Service role full access to storage"
+ON storage.objects FOR ALL
+TO service_role
+USING (bucket_id = 'quote-uploads')
+WITH CHECK (bucket_id = 'quote-uploads');
+
+-- ============================================================================
+-- LIFECYCLE CLEANUP FUNCTION
+-- ============================================================================
+-- Auto-delete processed uploads after 90 days to manage storage costs
+-- This function should be scheduled to run daily (e.g., via pg_cron)
+
+CREATE OR REPLACE FUNCTION public.delete_old_uploads()
+RETURNS TABLE(deleted_count INTEGER, errors_count INTEGER) AS $$
+DECLARE
+  old_upload RECORD;
+  v_deleted_count INTEGER := 0;
+  v_errors_count INTEGER := 0;
+BEGIN
+  -- Find uploads that are completed and older than 90 days
+  FOR old_upload IN
+    SELECT id, storage_path
+    FROM public.uploads
+    WHERE processed_at < NOW() - INTERVAL '90 days'
+    AND status = 'completed'
+    AND storage_path IS NOT NULL
+  LOOP
+    BEGIN
+      -- Note: Actual file deletion from storage must be done via Supabase API
+      -- This function only updates the database record
+      -- A separate background job should handle physical file deletion
+
+      -- Update database record to mark as archived
+      UPDATE public.uploads
+      SET
+        status = 'archived',
+        storage_path = NULL,
+        parsed_payload_json = NULL  -- Clear large JSON data to save space
+      WHERE id = old_upload.id;
+
+      v_deleted_count := v_deleted_count + 1;
+
+      RAISE NOTICE 'Archived upload % (storage_path: %)', old_upload.id, old_upload.storage_path;
+    EXCEPTION WHEN OTHERS THEN
+      v_errors_count := v_errors_count + 1;
+      RAISE WARNING 'Failed to archive upload %: %', old_upload.id, SQLERRM;
+    END;
+  END LOOP;
+
+  RETURN QUERY SELECT v_deleted_count, v_errors_count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Example: Schedule daily cleanup at 2 AM (requires pg_cron extension)
+-- First, enable pg_cron extension (run as superuser):
+-- CREATE EXTENSION IF NOT EXISTS pg_cron;
+--
+-- Then schedule the job:
+-- SELECT cron.schedule(
+--   'cleanup-old-uploads',
+--   '0 2 * * *',  -- At 2:00 AM every day
+--   'SELECT public.delete_old_uploads();'
+-- );
+--
+-- To manually run the cleanup:
+-- SELECT * FROM public.delete_old_uploads();
+
+-- ============================================================================
+-- HELPER FUNCTION: Get upload statistics for a quote
+-- ============================================================================
+-- Returns file count and total size for all uploads in a quote
+-- Useful for enforcing upload limits
+
+CREATE OR REPLACE FUNCTION public.get_quote_upload_stats(p_quote_id UUID)
+RETURNS TABLE(file_count BIGINT, total_size_bytes BIGINT) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    COUNT(*)::BIGINT as file_count,
+    COALESCE(SUM(size_bytes), 0)::BIGINT as total_size_bytes
+  FROM public.uploads
+  WHERE quote_id = p_quote_id
+  AND status != 'archived';
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- Example usage:
+-- SELECT * FROM get_quote_upload_stats('550e8400-e29b-41d4-a716-446655440000'::uuid);
+
+-- ============================================================================
+-- VERIFICATION QUERIES FOR STORAGE POLICIES
+-- ============================================================================
+
+-- To verify storage policies exist:
+-- SELECT schemaname, tablename, policyname, permissive, roles, cmd, qual
+-- FROM pg_policies
+-- WHERE schemaname = 'storage' AND tablename = 'objects'
+-- ORDER BY policyname;
+
+-- To test upload stats function:
+-- SELECT * FROM get_quote_upload_stats((SELECT id FROM quotes LIMIT 1));
+
+-- To test lifecycle cleanup (dry run):
+-- SELECT id, original_name, status, processed_at,
+--        NOW() - processed_at as age
+-- FROM uploads
+-- WHERE processed_at < NOW() - INTERVAL '90 days'
+-- AND status = 'completed';
+
+-- ============================================================================
+-- NOTES ON STORAGE BUCKET SETUP
+-- ============================================================================
+--
+-- The 'quote-uploads' bucket must be created manually in Supabase Dashboard:
+-- 1. Go to Storage section in Supabase Dashboard
+-- 2. Click "Create Bucket"
+-- 3. Set name to: quote-uploads
+-- 4. Set public to: false (private)
+-- 5. Set file size limit to: 104857600 (100MB)
+-- 6. Configure allowed MIME types (optional, can be enforced in application)
+--
+-- Storage path structure: quotes/{quote_id}/{timestamp}_{filename}
+-- Example: quotes/550e8400-e29b-41d4-a716-446655440000/1699564800000_order.pdf
+--
+-- Benefits of this structure:
+-- - Easy to find all files for a quote
+-- - Timestamp prevents filename conflicts
+-- - Original filename preserved for user reference
+-- - Hierarchical structure supports folder operations
+--
+-- Security considerations:
+-- - All files require authentication (private bucket)
+-- - RLS policies enforce quote-level access control
+-- - Filename sanitization prevents path traversal
+-- - MIME type validation prevents malicious uploads
+-- - File size limits prevent storage abuse
+-- - Lifecycle policies manage storage costs
+--
+-- For production:
+-- - Consider implementing virus scanning (ClamAV or cloud service)
+-- - Set up monitoring for storage usage
+-- - Configure backup policies for important uploads
+-- - Implement rate limiting to prevent abuse
+-- - Consider CDN for frequently accessed files
+
+-- ============================================================================
+-- PHASE 6: QUOTE WORKFLOW & APPROVAL SYSTEM
+-- ============================================================================
+
+-- Price Overrides Table (for tracking discounts/markups)
+CREATE TABLE IF NOT EXISTS public.price_overrides (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  quote_id UUID NOT NULL REFERENCES public.quotes(id) ON DELETE CASCADE,
+  quote_line_id UUID REFERENCES public.quote_lines(id) ON DELETE CASCADE,
+  original_price NUMERIC(10, 2) NOT NULL,
+  override_price NUMERIC(10, 2) NOT NULL,
+  discount_percent NUMERIC(5, 2),
+  reason TEXT,
+  requires_approval BOOLEAN NOT NULL DEFAULT false,
+  approval_status TEXT NOT NULL DEFAULT 'pending' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
+  approval_requested_at TIMESTAMPTZ,
+  approval_expires_at TIMESTAMPTZ,
+  approver_notified_at TIMESTAMPTZ,
+  approved_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  approved_at TIMESTAMPTZ,
+  approval_notes TEXT,
+  created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_overrides_quote_id ON public.price_overrides(quote_id);
+CREATE INDEX IF NOT EXISTS idx_price_overrides_approval_status ON public.price_overrides(approval_status);
+CREATE INDEX IF NOT EXISTS idx_price_overrides_created_at ON public.price_overrides(created_at DESC);
+
+-- Approval Thresholds Table
+CREATE TABLE IF NOT EXISTS public.approval_thresholds (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  threshold_type TEXT NOT NULL CHECK (threshold_type IN ('discount_percent', 'discount_amount')),
+  threshold_value NUMERIC(10, 2) NOT NULL,
+  approver_role TEXT NOT NULL CHECK (approver_role IN ('ADMIN', 'MANAGER', 'SALES')),
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO public.approval_thresholds (threshold_type, threshold_value, approver_role, is_active)
+VALUES
+  ('discount_percent', 10, 'MANAGER', true),
+  ('discount_percent', 25, 'ADMIN', true),
+  ('discount_amount', 500, 'MANAGER', true),
+  ('discount_amount', 1000, 'ADMIN', true)
+ON CONFLICT DO NOTHING;
+
+-- Notifications Table
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('approval_required', 'approval_approved', 'approval_rejected', 'quote_sent', 'quote_accepted')),
+  title TEXT NOT NULL,
+  message TEXT,
+  link_url TEXT,
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON public.notifications(user_id) WHERE read_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON public.notifications(created_at DESC);
+
+-- Internal Notes Table
+CREATE TABLE IF NOT EXISTS public.internal_notes (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  quote_id UUID NOT NULL REFERENCES public.quotes(id) ON DELETE CASCADE,
+  note TEXT NOT NULL,
+  created_by UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_internal_notes_quote_id ON public.internal_notes(quote_id);
+CREATE INDEX IF NOT EXISTS idx_internal_notes_created_at ON public.internal_notes(created_at DESC);
+
+-- ============================================================================
+-- STATUS VALIDATION TRIGGER
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.validate_quote_status_transition()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_valid_transitions TEXT[];
+BEGIN
+  -- Define valid transitions as array
+  v_valid_transitions := ARRAY[
+    'draft:submitted',
+    'submitted:reviewed',
+    'submitted:draft',
+    'reviewed:sent',
+    'reviewed:draft',
+    'sent:accepted',
+    'sent:declined',
+    'sent:expired',
+    'sent:reviewed',
+    'sent:draft'
+  ];
+
+  -- Check if transition is valid
+  IF OLD.status IS DISTINCT FROM NEW.status AND
+     NOT ((OLD.status || ':' || NEW.status) = ANY(v_valid_transitions)) THEN
+    RAISE EXCEPTION 'Invalid status transition from % to %', OLD.status, NEW.status;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validate_quote_status ON public.quotes;
+CREATE TRIGGER trg_validate_quote_status
+BEFORE UPDATE OF status ON public.quotes
+FOR EACH ROW
+WHEN (OLD.status IS DISTINCT FROM NEW.status)
+EXECUTE FUNCTION public.validate_quote_status_transition();
+
+-- ============================================================================
+-- AUTO-EXPIRE QUOTES FUNCTION
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.expire_old_quotes()
+RETURNS void AS $$
+BEGIN
+  UPDATE public.quotes
+  SET status = 'expired'
+  WHERE status = 'sent'
+    AND expires_at < NOW()
+    AND expires_at IS NOT NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================================
+-- METRICS TABLE (Phase 9: Analytics & Reporting)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.metrics (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  metric_name TEXT NOT NULL,
+  value NUMERIC NOT NULL,
+  dimensions JSONB DEFAULT '{}'::jsonb,
+  recorded_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_metrics_name_time ON public.metrics(metric_name, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_metrics_dimensions ON public.metrics USING GIN(dimensions);
+
+-- ============================================================================
+-- REPORT ARCHIVE TABLE (Phase 9: Analytics & Reporting)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.report_archive (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  template_id TEXT NOT NULL,
+  date_range_start TIMESTAMPTZ NOT NULL,
+  date_range_end TIMESTAMPTZ NOT NULL,
+  storage_path TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_archive_template ON public.report_archive(template_id, created_at DESC);
+
+-- ============================================================================
+-- METRICS FUNCTIONS (Phase 9: Analytics & Reporting)
+-- ============================================================================
+
+-- Quote conversion funnel
+CREATE OR REPLACE FUNCTION public.get_quote_funnel(
+  p_start_date TIMESTAMPTZ,
+  p_end_date TIMESTAMPTZ
+)
+RETURNS TABLE (
+  stage TEXT,
+  count BIGINT,
+  conversion_rate NUMERIC
+) AS $$
+WITH funnel AS (
+  SELECT
+    'Created' as stage,
+    COUNT(*) as count,
+    1 as order_num
+  FROM public.quotes WHERE created_at BETWEEN p_start_date AND p_end_date
+
+  UNION ALL
+
+  SELECT 'Submitted', COUNT(*), 2
+  FROM public.quotes WHERE submitted_at BETWEEN p_start_date AND p_end_date
+
+  UNION ALL
+
+  SELECT 'Sent', COUNT(*), 3
+  FROM public.quotes WHERE sent_at BETWEEN p_start_date AND p_end_date
+
+  UNION ALL
+
+  SELECT 'Accepted', COUNT(*), 4
+  FROM public.quotes WHERE status = 'accepted' AND created_at BETWEEN p_start_date AND p_end_date
+)
+SELECT
+  stage,
+  count,
+  ROUND(count::NUMERIC / FIRST_VALUE(count) OVER (ORDER BY order_num) * 100, 2) as conversion_rate
+FROM funnel
+ORDER BY order_num;
+$$ LANGUAGE SQL;
+
+-- Revenue metrics
+CREATE OR REPLACE FUNCTION public.get_revenue_metrics(
+  p_start_date TIMESTAMPTZ,
+  p_end_date TIMESTAMPTZ
+)
+RETURNS TABLE (
+  total_revenue NUMERIC,
+  average_quote_value NUMERIC,
+  accepted_quotes BIGINT,
+  total_margin NUMERIC
+) AS $$
+  SELECT
+    COALESCE(SUM(total), 0) as total_revenue,
+    COALESCE(AVG(total), 0) as average_quote_value,
+    COUNT(*) as accepted_quotes,
+    COALESCE(SUM(total * (COALESCE(margin_percent, 0) / 100)), 0) as total_margin
+  FROM public.quotes
+  WHERE status = 'accepted'
+    AND created_at BETWEEN p_start_date AND p_end_date;
+$$ LANGUAGE SQL;
+
+-- OCR accuracy tracking
+CREATE OR REPLACE FUNCTION public.track_ocr_accuracy()
+RETURNS TABLE (
+  average_confidence NUMERIC,
+  total_extractions BIGINT,
+  high_confidence_percent NUMERIC
+) AS $$
+  SELECT
+    COALESCE(AVG(confidence_score), 0) as average_confidence,
+    COUNT(*) as total_extractions,
+    ROUND(COUNT(*) FILTER (WHERE confidence_score > 0.8)::NUMERIC / NULLIF(COUNT(*), 0) * 100, 2) as high_confidence_percent
+  FROM public.uploads
+  WHERE file_type IN ('pdf', 'image')
+    AND status = 'completed';
+$$ LANGUAGE SQL;
+
+-- ============================================================================
+-- PHASE 10: NOTIFICATIONS & ALERTS SYSTEM
+-- ============================================================================
+
+-- Notification Preferences Table
+-- Stores user preferences for different notification types
+CREATE TABLE IF NOT EXISTS public.notification_preferences (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  notification_type TEXT NOT NULL,
+  email_enabled BOOLEAN NOT NULL DEFAULT true,
+  digest_enabled BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, notification_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_preferences_user ON public.notification_preferences(user_id);
+CREATE INDEX IF NOT EXISTS idx_notification_preferences_type ON public.notification_preferences(notification_type);
+
+-- Notification Queue Table
+-- Queues notifications for sending with retry logic
+CREATE TABLE IF NOT EXISTS public.notification_queue (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  notification_type TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body_html TEXT NOT NULL,
+  body_text TEXT,
+  metadata_json JSONB DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed')),
+  retry_count INTEGER DEFAULT 0,
+  scheduled_at TIMESTAMPTZ DEFAULT NOW(),
+  sent_at TIMESTAMPTZ,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_queue_status ON public.notification_queue(status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_notification_queue_user ON public.notification_queue(user_id);
+CREATE INDEX IF NOT EXISTS idx_notification_queue_created_at ON public.notification_queue(created_at DESC);
+
+-- Slack Configuration Table
+-- Stores Slack webhook URLs and event configuration
+CREATE TABLE IF NOT EXISTS public.slack_configs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_type TEXT NOT NULL UNIQUE,
+  webhook_url TEXT NOT NULL,
+  channel TEXT,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_slack_configs_event_type ON public.slack_configs(event_type);
+CREATE INDEX IF NOT EXISTS idx_slack_configs_enabled ON public.slack_configs(enabled);
+
+-- Webhooks Table
+-- Stores customer-registered webhooks for external integrations
+CREATE TABLE IF NOT EXISTS public.webhooks (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  event_types TEXT[] NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  last_triggered_at TIMESTAMPTZ,
+  failure_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhooks_user ON public.webhooks(user_id);
+CREATE INDEX IF NOT EXISTS idx_webhooks_active ON public.webhooks(is_active);
+CREATE INDEX IF NOT EXISTS idx_webhooks_created_at ON public.webhooks(created_at DESC);
+
+-- Webhook Deliveries Table
+-- Tracks all webhook delivery attempts for debugging and audit
+CREATE TABLE IF NOT EXISTS public.webhook_deliveries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  webhook_id UUID NOT NULL REFERENCES public.webhooks(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  payload_json JSONB NOT NULL,
+  response_status INTEGER,
+  response_body TEXT,
+  retry_count INTEGER DEFAULT 0,
+  delivered_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_webhook ON public.webhook_deliveries(webhook_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_delivered_at ON public.webhook_deliveries(delivered_at);
+
+-- Enable RLS for notification tables
+ALTER TABLE public.notification_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notification_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.webhooks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.webhook_deliveries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.slack_configs ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policy: Users can view and update their own notification preferences
+DROP POLICY IF EXISTS "Users can manage their notification preferences" ON public.notification_preferences;
+CREATE POLICY "Users can manage their notification preferences"
+  ON public.notification_preferences
+  FOR ALL
+  TO authenticated
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+-- RLS Policy: Service role has full access to notification preferences
+DROP POLICY IF EXISTS "Service role full access to notification_preferences" ON public.notification_preferences;
+CREATE POLICY "Service role full access to notification_preferences"
+  ON public.notification_preferences
+  FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
+
+-- RLS Policy: Users can view and manage their own webhooks
+DROP POLICY IF EXISTS "Users can manage their webhooks" ON public.webhooks;
+CREATE POLICY "Users can manage their webhooks"
+  ON public.webhooks
+  FOR ALL
+  TO authenticated
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+-- RLS Policy: Service role has full access to webhooks
+DROP POLICY IF EXISTS "Service role full access to webhooks" ON public.webhooks;
+CREATE POLICY "Service role full access to webhooks"
+  ON public.webhooks
+  FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
+
+-- RLS Policy: Service role has full access to notification_queue
+DROP POLICY IF EXISTS "Service role full access to notification_queue" ON public.notification_queue;
+CREATE POLICY "Service role full access to notification_queue"
+  ON public.notification_queue
+  FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
+
+-- RLS Policy: ADMIN can view all slack configs
+DROP POLICY IF EXISTS "ADMIN can manage slack configs" ON public.slack_configs;
+CREATE POLICY "ADMIN can manage slack configs"
+  ON public.slack_configs
+  FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.users
+      WHERE users.id = auth.uid()
+      AND users.role = 'ADMIN'
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.users
+      WHERE users.id = auth.uid()
+      AND users.role = 'ADMIN'
+    )
+  );
+
+-- RLS Policy: Service role has full access to slack_configs
+DROP POLICY IF EXISTS "Service role full access to slack_configs" ON public.slack_configs;
+CREATE POLICY "Service role full access to slack_configs"
+  ON public.slack_configs
+  FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);

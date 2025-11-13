@@ -225,3 +225,28 @@ export interface PriceTrace {
   calculation: string
   result: number
 }
+
+/**
+ * Upload Types
+ * Used for file upload tracking and processing
+ */
+
+export type FileType = 'pdf' | 'image' | 'spreadsheet' | 'audio' | 'text'
+
+export type UploadStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'archived'
+
+export interface Upload {
+  id: string
+  quote_id: string
+  file_type: FileType
+  original_name: string
+  storage_path: string | null
+  size_bytes: number
+  mime_type: string
+  status: UploadStatus
+  parsed_payload_json: Record<string, any> | null
+  confidence_score: number | null
+  error_message: string | null
+  created_at: string
+  processed_at: string | null
+}
