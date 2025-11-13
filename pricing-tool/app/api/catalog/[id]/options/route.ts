@@ -36,7 +36,7 @@ const CreateOptionSchema = z.object({
 // GET /api/catalog/[id]/options - Get all options for a product
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   // Require SALES or ADMIN role
   const authResult = await requireRole(request, ['SALES', 'ADMIN'])
@@ -45,7 +45,8 @@ export async function GET(
   }
 
   const supabase = getSupabaseClient()
-  const catalogItemId = params.id
+  const { id } = await params
+  const catalogItemId = id
 
   try {
     // Fetch all options for the catalog item with their values
@@ -85,7 +86,7 @@ export async function GET(
 // POST /api/catalog/[id]/options - Create a new option
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   // Require ADMIN role for creating options
   const authResult = await requireRole(request, ['ADMIN'])
@@ -94,7 +95,8 @@ export async function POST(
   }
 
   const supabase = getSupabaseClient()
-  const catalogItemId = params.id
+  const { id } = await params
+  const catalogItemId = id
 
   // Parse and validate request body
   const bodyResult = await parseJsonBody(request, CreateOptionSchema)

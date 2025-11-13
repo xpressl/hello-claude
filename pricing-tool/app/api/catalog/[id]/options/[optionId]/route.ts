@@ -37,7 +37,7 @@ const UpdateOptionSchema = z.object({
 // PATCH /api/catalog/[id]/options/[optionId] - Update an option
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string; optionId: string } }
+  { params }: { params: Promise<{ id: string; optionId: string }> }
 ) {
   // Require ADMIN role for updating options
   const authResult = await requireRole(request, ['ADMIN'])
@@ -46,7 +46,7 @@ export async function PATCH(
   }
 
   const supabase = getSupabaseClient()
-  const { id: catalogItemId, optionId } = params
+  const { id: catalogItemId, optionId } = await params
 
   // Parse and validate request body
   const bodyResult = await parseJsonBody(request, UpdateOptionSchema)
@@ -117,7 +117,7 @@ export async function PATCH(
 // DELETE /api/catalog/[id]/options/[optionId] - Delete an option
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; optionId: string } }
+  { params }: { params: Promise<{ id: string; optionId: string }> }
 ) {
   // Require ADMIN role for deleting options
   const authResult = await requireRole(request, ['ADMIN'])
@@ -126,7 +126,7 @@ export async function DELETE(
   }
 
   const supabase = getSupabaseClient()
-  const { id: catalogItemId, optionId } = params
+  const { id: catalogItemId, optionId } = await params
 
   try {
     // Verify option exists and belongs to the catalog item

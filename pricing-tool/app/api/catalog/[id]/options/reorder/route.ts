@@ -28,7 +28,7 @@ const ReorderSchema = z.object({
 // PATCH /api/catalog/[id]/options/reorder - Reorder options
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   // Require ADMIN role for reordering options
   const authResult = await requireRole(request, ['ADMIN'])
@@ -37,7 +37,8 @@ export async function PATCH(
   }
 
   const supabase = getSupabaseClient()
-  const catalogItemId = params.id
+  const { id } = await params
+  const catalogItemId = id
 
   // Parse and validate request body
   const bodyResult = await parseJsonBody(request, ReorderSchema)

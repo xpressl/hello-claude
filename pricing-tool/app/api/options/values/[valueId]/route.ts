@@ -28,7 +28,7 @@ const UpdateOptionValueSchema = z.object({
 // PATCH /api/options/values/[valueId] - Update an option value
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { valueId: string } }
+  { params }: { params: Promise<{ valueId: string }> }
 ) {
   // Require ADMIN role for updating option values
   const authResult = await requireRole(request, ['ADMIN'])
@@ -37,7 +37,7 @@ export async function PATCH(
   }
 
   const supabase = getSupabaseClient()
-  const { valueId } = params
+  const { valueId } = await params
 
   // Parse and validate request body
   const bodyResult = await parseJsonBody(request, UpdateOptionValueSchema)
@@ -103,7 +103,7 @@ export async function PATCH(
 // DELETE /api/options/values/[valueId] - Delete an option value
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { valueId: string } }
+  { params }: { params: Promise<{ valueId: string }> }
 ) {
   // Require ADMIN role for deleting option values
   const authResult = await requireRole(request, ['ADMIN'])
@@ -112,7 +112,7 @@ export async function DELETE(
   }
 
   const supabase = getSupabaseClient()
-  const { valueId } = params
+  const { valueId } = await params
 
   try {
     // Verify option value exists

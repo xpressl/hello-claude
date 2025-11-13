@@ -28,7 +28,7 @@ const CreateOptionValueSchema = z.object({
 // GET /api/options/[optionId]/values - Get all values for an option
 export async function GET(
   request: NextRequest,
-  { params }: { params: { optionId: string } }
+  { params }: { params: Promise<{ optionId: string }> }
 ) {
   // Require SALES or ADMIN role
   const authResult = await requireRole(request, ['SALES', 'ADMIN'])
@@ -37,7 +37,7 @@ export async function GET(
   }
 
   const supabase = getSupabaseClient()
-  const { optionId } = params
+  const { optionId } = await params
 
   try {
     // Verify option exists
@@ -79,7 +79,7 @@ export async function GET(
 // POST /api/options/[optionId]/values - Create a new option value
 export async function POST(
   request: NextRequest,
-  { params }: { params: { optionId: string } }
+  { params }: { params: Promise<{ optionId: string }> }
 ) {
   // Require ADMIN role for creating option values
   const authResult = await requireRole(request, ['ADMIN'])
@@ -88,7 +88,7 @@ export async function POST(
   }
 
   const supabase = getSupabaseClient()
-  const { optionId } = params
+  const { optionId } = await params
 
   // Parse and validate request body
   const bodyResult = await parseJsonBody(request, CreateOptionValueSchema)
