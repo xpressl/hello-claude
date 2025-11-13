@@ -11,6 +11,7 @@ import {
   createEvent,
 } from "@/lib/api-utils"
 import { isQuoteLocked } from "@/lib/validations"
+import { calculatePrice } from "@/lib/pricing-engine"
 
 // Create Supabase client
 function getSupabaseClient() {
@@ -84,11 +85,15 @@ export async function POST(
       )
     }
 
-    // Validate catalog_item_id if provided
+    // Validate catalog_item_id if provided and calculate price
+    let calculatedUnitPrice = unit_price
+    let calculatedExtendedPrice = quantity * unit_price
+    let priceTrace = null
+
     if (catalog_item_id) {
       const { data: product, error: productError } = await supabase
         .from("products")
-        .select("id")
+        .select("id, sku, name, unit_price")
         .eq("id", catalog_item_id)
         .single()
 
@@ -98,23 +103,49 @@ export async function POST(
           400
         )
       }
+
+      // Use pricing engine to calculate price if options are provided
+      if (options && Object.keys(options).length > 0) {
+        try {
+          const pricingResult = await calculatePrice({
+            catalogItem: {
+              id: product.id,
+              sku: product.sku,
+              name: product.name,
+              unit_price: product.unit_price
+            },
+            options: options,
+            quantity: quantity
+          })
+
+          calculatedUnitPrice = pricingResult.unit_price
+          calculatedExtendedPrice = pricingResult.extended_price
+          priceTrace = pricingResult.trace
+        } catch (error: any) {
+          console.error("Pricing engine error:", error)
+          return errorResponse("Failed to calculate price", 500, {
+            message: error.message
+          })
+        }
+      } else {
+        // No options, use product base price
+        calculatedUnitPrice = product.unit_price
+        calculatedExtendedPrice = quantity * product.unit_price
+      }
     }
 
     // Get next line number
     const lineNumber = await getNextLineNumber(quoteId)
 
-    // Calculate extended price
-    const extendedPrice = quantity * unit_price
-
-    // Create line
+    // Create line with calculated prices
     const lineData: any = {
       quote_id: quoteId,
       line_number: lineNumber,
       description,
       quantity,
       unit: unit || "EA",
-      unit_price,
-      extended_price: extendedPrice,
+      unit_price: calculatedUnitPrice,
+      extended_price: calculatedExtendedPrice,
       source: source || "manual",
     }
 
@@ -122,7 +153,18 @@ export async function POST(
     if (options) lineData.options_json = options
     if (confidence_score !== undefined)
       lineData.confidence_score = confidence_score
-    if (mapping_warnings) lineData.mapping_warnings_json = mapping_warnings
+
+    // Store price trace in mapping_warnings_json for audit trail
+    // Note: In production, consider adding a dedicated metadata_json column to quote_lines
+    if (priceTrace) {
+      lineData.mapping_warnings_json = {
+        ...mapping_warnings,
+        price_trace: priceTrace
+      }
+    } else if (mapping_warnings) {
+      lineData.mapping_warnings_json = mapping_warnings
+    }
+
     if (notes) lineData.notes = notes
 
     const { data: line, error: lineError } = await supabase

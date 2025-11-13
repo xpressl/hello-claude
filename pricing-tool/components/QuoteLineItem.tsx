@@ -1,12 +1,14 @@
 "use client"
 
+import { useState } from "react"
 import { QuoteLineDraft } from "@/lib/types"
 import { formatMoney } from "@/lib/pricing"
+import OptionsPicker from "./OptionsPicker"
 
 interface QuoteLineItemProps {
   line: QuoteLineDraft
   index: number
-  onChange: (index: number, field: keyof QuoteLineDraft, value: string | number) => void
+  onChange: (index: number, field: keyof QuoteLineDraft, value: string | number | Record<string, any>) => void
   onDuplicate: (index: number) => void
   onRemove: (index: number) => void
   viewMode?: 'card' | 'table'
@@ -22,10 +24,24 @@ export default function QuoteLineItem({
   onRemove,
   viewMode = 'card'
 }: QuoteLineItemProps) {
+  const [showOptions, setShowOptions] = useState(false)
+
   const handleRemoveClick = () => {
     if (confirm('Remove this line item?')) {
       onRemove(index)
     }
+  }
+
+  const handleOptionsChange = (options: Record<string, any>, priceImpact: number) => {
+    // Update options_json
+    onChange(index, 'options_json', options)
+
+    // Update unit_price with base price + price impact
+    // Note: base price should come from the catalog item
+    // For now, we'll just add the impact to the current price
+    // In a real scenario, you'd fetch the base price from the catalog
+    const newPrice = line.unit_price + priceImpact
+    onChange(index, 'unit_price', newPrice)
   }
 
   if (viewMode === 'table') {
@@ -202,6 +218,42 @@ export default function QuoteLineItem({
             </div>
           </div>
         </div>
+
+        {/* Options Section - Show if item has catalog_item_id */}
+        {line.catalog_item_id && (
+          <div className="border-t pt-3 mt-3">
+            <button
+              type="button"
+              onClick={() => setShowOptions(!showOptions)}
+              className="flex items-center justify-between w-full text-sm font-medium text-gray-700 mb-3"
+            >
+              <span>Configure Options</span>
+              <svg
+                className={`w-4 h-4 transition-transform ${showOptions ? 'rotate-180' : ''}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </button>
+
+            {showOptions && (
+              <OptionsPicker
+                catalogItemId={line.catalog_item_id}
+                initialOptions={line.options_json || {}}
+                onOptionsChange={handleOptionsChange}
+                basePrice={line.unit_price}
+                compact={true}
+              />
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
